@@ -33,19 +33,19 @@ return {
     version = "0.0.1-1",
     dependencies = {
       "lua == 5.1",
-      "santoku >= 0.0.314-1",
+      "santoku >= 0.0.324-1",
     },
     build = {
       dependencies = {
-        "santoku-web >= 0.0.404-1",
+        "santoku-web >= 0.0.467-1",
       }
     },
 
     server = {
       dependencies = {
         "lua == 5.1",
-        "santoku >= 0.0.314-1",
-        "santoku-web >= 0.0.404-1",
+        "santoku >= 0.0.324-1",
+        "santoku-web >= 0.0.467-1",
         "santoku-mustache >= 0.0.14-1",
         "santoku-sqlite >= 0.0.29-1",
         "santoku-sqlite-migrate >= 0.0.19-1",
@@ -58,9 +58,9 @@ return {
       files = true,
       dependencies = {
         "lua == 5.1",
-        "santoku >= 0.0.314-1",
-        "santoku-web >= 0.0.404-1",
-        "santoku-http >= 0.0.19-1",
+        "santoku >= 0.0.324-1",
+        "santoku-web >= 0.0.467-1",
+        "santoku-http >= 0.0.22-1",
         "santoku-sqlite >= 0.0.29-1",
         "santoku-sqlite-migrate >= 0.0.19-1",
       },
