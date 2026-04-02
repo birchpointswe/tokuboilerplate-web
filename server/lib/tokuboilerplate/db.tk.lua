@@ -8,7 +8,7 @@
   t_migrations = serialize(migrations, true)
 %>
 
-local lsqlite3 = require("lsqlite3")
+local db_mod = require("santoku.sqlite.db")
 local sqlite = require("santoku.sqlite")
 local sqlite_migrate = require("santoku.sqlite.migrate")
 
@@ -19,7 +19,7 @@ return function (db_file)
   end
 
   local M = {}
-  local db = sqlite(lsqlite3.open(db_file))
+  local db = sqlite(db_mod.open(db_file))
 
   db.exec("pragma journal_mode = WAL")
   db.exec("pragma synchronous = NORMAL")
