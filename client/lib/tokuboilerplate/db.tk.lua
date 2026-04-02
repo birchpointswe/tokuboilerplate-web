@@ -10,7 +10,7 @@
 
 local sqlite_worker = require("santoku.web.sqlite.worker")
 local migrate = require("santoku.sqlite.migrate")
-local tpl = require("tokuboilerplate.web.templates")
+local json = require("cjson")
 
 local PAGE_SIZE = 10
 
@@ -31,10 +31,10 @@ local function format_records (recs, has_auth, just_synced_ids)
   return recs
 end
 
-return sqlite_worker("/tokuboilerplate.db", function (ok, db, callback)
+return sqlite_worker("/tokuboilerplate.db", function (ok, db)
 
   if not ok then
-    return callback(false, db)
+    return false, db
   end
 
   db.exec("pragma locking_mode = EXCLUSIVE")
@@ -90,36 +90,10 @@ return sqlite_worker("/tokuboilerplate.db", function (ok, db, callback)
     local total_pages = math.max(1, math.ceil(total / PAGE_SIZE))
     if page > total_pages then page = total_pages end
     local has_auth = sub ~= nil
-    return tpl["number-items"]({
+    return json.encode({
       numbers = format_records((sub and get_records_page(sub, PAGE_SIZE, offset)) or {}, has_auth),
       page = page,
       total_pages = total_pages,
-      show_pagination = total_pages > 1,
-      has_prev = page > 1,
-      has_next = page < total_pages,
-      prev_page = page - 1,
-      next_page = page + 1
-    })
-  end
-
-  local function get_numbers_with_synced (page, just_synced_ids)
-    page = tonumber(page) or 1
-    if page < 1 then page = 1 end
-    local sub = M.get_authorization()
-    local offset = (page - 1) * PAGE_SIZE
-    local total = (sub and get_record_count(sub)) or 0
-    local total_pages = math.max(1, math.ceil(total / PAGE_SIZE))
-    if page > total_pages then page = total_pages end
-    local has_auth = sub ~= nil
-    return tpl["number-items"]({
-      numbers = format_records((sub and get_records_page(sub, PAGE_SIZE, offset)) or {}, has_auth, just_synced_ids),
-      page = page,
-      total_pages = total_pages,
-      show_pagination = total_pages > 1,
-      has_prev = page > 1,
-      has_next = page < total_pages,
-      prev_page = page - 1,
-      next_page = page + 1
     })
   end
 
@@ -184,13 +158,13 @@ return sqlite_worker("/tokuboilerplate.db", function (ok, db, callback)
   M.create_number = function ()
     local sub = get_or_create_sub()
     local hlc = gen_hlc()
-    return tpl["number-item"](format_record(create_number(sub, hlc), true))
+    return json.encode(format_record(create_number(sub, hlc), true))
   end
 
   M.update_number = function (id)
     local sub = get_or_create_sub()
     local hlc = gen_hlc()
-    return tpl["number-item"](format_record(update_number(sub, id, hlc), true))
+    return json.encode(format_record(update_number(sub, id, hlc), true))
   end
 
   local do_delete_number = db.runner([[
@@ -312,63 +286,40 @@ return sqlite_worker("/tokuboilerplate.db", function (ok, db, callback)
     end
   end
 
-  local function get_sync_state_data ()
+  M.get_sync_state = function ()
     local sub = M.get_authorization()
     local auto_sync = M.get_auto_sync()
-    return {
+    return json.encode({
       state = compute_state(sub ~= nil, sub and has_unsynced(sub) == 1, auto_sync),
       auto_sync = auto_sync
-    }
-  end
-
-  M.get_sync_status = function ()
-    return tpl["sync-state"](get_sync_state_data())
+    })
   end
 
   M.toggle_auto_sync = function ()
     local current = M.get_auto_sync()
     M.set_auto_sync(not current)
-    local data = get_sync_state_data()
-    if data.auto_sync and data.state == "pending" then
-      data.trigger_sync = true
-    end
-    return tpl["sync-state"](data)
-  end
-
-  local function get_sync_state_oob ()
     local sub = M.get_authorization()
-    if not sub then
-      return tpl["sync-state"]({
-        state = "error",
-        oob = true
-      })
-    end
     local auto_sync = M.get_auto_sync()
-    return tpl["sync-state"]({
-      state = auto_sync and "pending" or "dirty",
+    local state = compute_state(sub ~= nil, sub and has_unsynced(sub) == 1, auto_sync)
+    return json.encode({
+      state = state,
       auto_sync = auto_sync,
-      oob = true,
-      trigger_sync = auto_sync
+      trigger_sync = auto_sync and state == "pending"
     })
   end
 
-  M.create_number_with_state = function ()
-    local sub = get_or_create_sub()
+  M.create_number_with_state = function (page)
+    get_or_create_sub()
     local hlc = gen_hlc()
-    create_number(sub, hlc)
-    return M.get_numbers(1) .. get_sync_state_oob()
+    create_number(get_or_create_sub(), hlc)
+    return M.get_numbers_with_state(1)
   end
 
-  M.update_number_with_state = function (id)
+  M.update_number_with_state = function (id, page)
     local sub = get_or_create_sub()
-    local already_dirty = was_dirty(sub, id) == 1
     local hlc = gen_hlc()
-    local rec = format_record(update_number(sub, id, hlc), true)
-    if not already_dirty then
-      rec.just_dirtied = true
-    end
-    local html = tpl["number-item"](rec)
-    return html .. get_sync_state_oob()
+    update_number(sub, id, hlc)
+    return M.get_numbers_with_state(page)
   end
 
   M.delete_number_with_state = function (id, page)
@@ -377,68 +328,58 @@ return sqlite_worker("/tokuboilerplate.db", function (ok, db, callback)
     do_delete_number(sub, id, hlc)
     page = tonumber(page) or 1
     local total = get_record_count(sub) or 0
-    local redirect_page = nil
     local offset = (page - 1) * PAGE_SIZE
     if offset >= total and page > 1 then
-      redirect_page = page - 1
+      page = page - 1
     end
-    return {
-      html = M.get_numbers(redirect_page or page) .. get_sync_state_oob(),
-      redirect_page = redirect_page
-    }
+    return M.get_numbers_with_state(page)
+  end
+
+  M.get_numbers_with_state = function (page)
+    page = tonumber(page) or 1
+    if page < 1 then page = 1 end
+    local sub = M.get_authorization()
+    local offset = (page - 1) * PAGE_SIZE
+    local total = (sub and get_record_count(sub)) or 0
+    local total_pages = math.max(1, math.ceil(total / PAGE_SIZE))
+    if page > total_pages then page = total_pages end
+    local has_auth = sub ~= nil
+    local auto_sync = M.get_auto_sync()
+    return json.encode({
+      numbers = format_records((sub and get_records_page(sub, PAGE_SIZE, offset)) or {}, has_auth),
+      page = page,
+      total_pages = total_pages,
+      sync_state = compute_state(has_auth, sub and has_unsynced(sub) == 1, auto_sync),
+      auto_sync = auto_sync,
+    })
   end
 
   M.get_auth_status = function ()
-    return tpl["session-state"]({ has_session = M.has_authorization() })
+    return json.encode({ has_session = M.has_authorization() })
   end
 
   M.delete_session = function ()
     M.set_authorization(nil)
-    return tpl["session-state"]({ has_session = false })
+    return json.encode({ has_session = false })
   end
 
   M.save_session = function (auth)
     M.set_authorization(auth)
-    return tpl["session-state"]({ has_session = true })
-  end
-
-  M.get_numbers_with_error_state = function (page)
-    local numbers_html = M.get_numbers(page)
-    local sync_state = tpl["sync-state"]({
-      state = "error",
-      auto_sync = M.get_auto_sync(),
-      oob = true
-    })
-    return numbers_html .. sync_state
+    return json.encode({ has_session = true })
   end
 
   M.complete_sync = function (server_changes_json, page)
     local sub = M.get_authorization()
-    if not sub then return M.get_numbers_with_error_state(page) end
-    page = tonumber(page) or 1
-    local offset = (page - 1) * PAGE_SIZE
-    local dirty_json = get_dirty_ids_on_page(sub, PAGE_SIZE, offset) or "[]"
-    local just_synced_ids = {}
-    for id in string.gmatch(dirty_json, '"([^"]+)"') do
-      just_synced_ids[id] = true
-    end
-
+    if not sub then return M.get_numbers_with_state(page) end
     apply_changes(server_changes_json, sub)
     mark_synced(sub)
-
     local max_hlc = get_max_local_hlc(sub)
     if max_hlc then
       M.set_last_sync(tostring(max_hlc))
     end
-
-    local sync_state = tpl["sync-state"]({
-      state = "synced",
-      auto_sync = M.get_auto_sync(),
-      oob = true
-    })
-    return get_numbers_with_synced(page, just_synced_ids) .. sync_state
+    return M.get_numbers_with_state(page)
   end
 
-  return callback(true, M)
+  return true, M
 
 end)

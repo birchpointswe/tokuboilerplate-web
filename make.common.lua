@@ -4,6 +4,8 @@ local str = require("santoku.string")
 local arr = require("santoku.array")
 local sys = require("santoku.system")
 local env = require("santoku.env")
+local build = require("santoku.make.build")
+local lp = require("santoku.web.lpeg")
 
 -- iOS icon/splash screen sizes (width, height, pixel ratio)
 local icon_sizes = { 192, 512 }
@@ -37,7 +39,7 @@ return {
     },
     build = {
       dependencies = {
-        "santoku-web >= 0.0.467-1",
+        "santoku-web >= 0.0.480-1",
       }
     },
 
@@ -45,11 +47,10 @@ return {
       dependencies = {
         "lua == 5.1",
         "santoku >= 0.0.324-1",
-        "santoku-web >= 0.0.467-1",
+        "santoku-web >= 0.0.480-1",
         "santoku-mustache >= 0.0.14-1",
-        "santoku-sqlite >= 0.0.29-1",
+        "santoku-sqlite >= 0.0.35-1",
         "santoku-sqlite-migrate >= 0.0.19-1",
-        "lsqlite3 >= 0.9.6-1",
         "argparse >= 0.7.1-1",
       },
     },
@@ -59,16 +60,15 @@ return {
       dependencies = {
         "lua == 5.1",
         "santoku >= 0.0.324-1",
-        "santoku-web >= 0.0.467-1",
+        "santoku-web >= 0.0.480-1",
         "santoku-http >= 0.0.22-1",
-        "santoku-sqlite >= 0.0.29-1",
+        "santoku-sqlite >= 0.0.35-1",
         "santoku-sqlite-migrate >= 0.0.19-1",
       },
       rules = {
         ["bundle$"] = {
           ldflags = {
             "--pre-js", "res/pre.js",
-            "--extern-pre-js", "res/sqlite/sqlite3.js"
           }
         }
       },
@@ -78,14 +78,20 @@ return {
         description = "A web app built with santoku",
         theme_color = "#1e293b",
         background_color = "#f5f5f5",
+        transforms = {
+          js = build.minify_js,
+          css = build.minify_css,
+          html = lp.minify_html,
+        },
       },
     },
 
     nginx = {
       ssl_self_signed = true,
-      ssl_port = "8443",
+      hsts = false,
+      ssl_port = env.var("SSL_PORT", "8443"),
       domain = "localhost",
-      port = "8080",
+      port = env.var("PORT", "8080"),
       workers = "auto",
       modules = {
         "tokuboilerplate.web.init",
@@ -126,46 +132,6 @@ return {
       local function pwa_hashed(filename)
         return "/{{" .. str.gsub(filename, "%.", "\\\\.") .. "}}"
       end
-      local htmx_file = fs.join(client_env.public_dir, "htmx.min.js")
-      submake.target({ client_env.target }, { htmx_file })
-      submake.target({ htmx_file }, {}, function ()
-        sys.execute({
-          "curl", "-sL", "-o", htmx_file,
-          "https://unpkg.com/htmx.org@2.0.7/dist/htmx.min.js"
-        })
-      end)
-      register_public_file("htmx.min.js")
-      local idiomorph_file = fs.join(client_env.public_dir, "idiomorph-ext.min.js")
-      submake.target({ client_env.target }, { idiomorph_file })
-      submake.target({ idiomorph_file }, {}, function ()
-        sys.execute({
-          "curl", "-sL", "-o", idiomorph_file,
-          "https://unpkg.com/idiomorph@0.7.4/dist/idiomorph-ext.min.js"
-        })
-      end)
-      register_public_file("idiomorph-ext.min.js")
-      local nested_env = client_env.environment == "test" and "test" or "build"
-      local bundler_cwd = fs.join(client_env.work_dir, "build", "default-wasm", nested_env)
-      local sqlite3_js = fs.join(bundler_cwd, "res/sqlite/sqlite3.js")
-      local bundle_target = fs.join(client_env.bundler_post_dir, "bundle")
-      submake.target({ bundle_target }, { sqlite3_js })
-      submake.target({ sqlite3_js }, {}, function ()
-        fs.mkdirp(fs.dirname(sqlite3_js))
-        sys.execute({
-          "curl", "-sL", "-o", sqlite3_js,
-          "https://unpkg.com/@sqlite.org/sqlite-wasm@3.51.1-build2/sqlite-wasm/jswasm/sqlite3.js"
-        })
-      end)
-      local sqlite3_wasm = fs.join(client_env.public_dir, "sqlite3.wasm")
-      submake.target({ client_env.target }, { sqlite3_wasm })
-      submake.target({ sqlite3_wasm }, {}, function ()
-        fs.mkdirp(fs.dirname(sqlite3_wasm))
-        sys.execute({
-          "curl", "-sL", "-o", sqlite3_wasm,
-          "https://unpkg.com/@sqlite.org/sqlite-wasm@3.51.1-build2/sqlite-wasm/jswasm/sqlite3.wasm"
-        })
-      end)
-      register_public_file("sqlite3.wasm")
       local roboto_weights = { "300", "400", "500", "700" }
       local roboto_urls = {
         ["300"] = "https://fonts.gstatic.com/s/roboto/v32/KFOlCnqEu92Fr1MmSU5fCxc4EsA.woff2",
@@ -259,7 +225,7 @@ return {
       envs.root.client.pwa.ios_icon = pwa_hashed("apple-touch-icon.png")
       envs.root.client.pwa.splash_screens = splash_opts
       if client_env.static_files_ok then
-        local all_static_files = { htmx_file, idiomorph_file, sqlite3_wasm, css_out, favicon_svg, apple_icon }
+        local all_static_files = { css_out, favicon_svg, apple_icon }
         for _, weight in ipairs(roboto_weights) do
           arr.push(all_static_files, fs.join(client_env.public_dir, "roboto-" .. weight .. ".woff2"))
         end
