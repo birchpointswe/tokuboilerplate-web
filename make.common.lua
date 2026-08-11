@@ -7,7 +7,6 @@ local env = require("santoku.env")
 local build = require("santoku.make.build")
 local lp = require("santoku.web.lpeg")
 
-
 local icon_sizes = { 192, 512 }
 local apple_icon_size = 180
 local splash_screens = {
@@ -35,22 +34,22 @@ return {
     version = "0.0.1-1",
     dependencies = {
       "lua == 5.1",
-      "santoku >= 0.0.324-1",
+      "santoku >= 1.0.0, < 2.0.0",
     },
     build = {
       dependencies = {
-        "santoku-web >= 0.0.480-1",
+        "santoku-web >= 1.0.0, < 2.0.0",
       }
     },
 
     server = {
       dependencies = {
         "lua == 5.1",
-        "santoku >= 0.0.324-1",
-        "santoku-web >= 0.0.480-1",
-        "santoku-mustache >= 0.0.14-1",
-        "santoku-sqlite >= 0.0.35-1",
-        "santoku-sqlite-migrate >= 0.0.19-1",
+        "santoku >= 1.0.0, < 2.0.0",
+        "santoku-web >= 1.0.0, < 2.0.0",
+        "santoku-mustache >= 1.0.0, < 2.0.0",
+        "santoku-sqlite >= 1.0.0, < 2.0.0",
+        "santoku-sqlite-migrate >= 1.0.0, < 2.0.0",
         "argparse >= 0.7.1-1",
       },
     },
@@ -59,11 +58,11 @@ return {
       files = true,
       dependencies = {
         "lua == 5.1",
-        "santoku >= 0.0.324-1",
-        "santoku-web >= 0.0.480-1",
-        "santoku-http >= 0.0.22-1",
-        "santoku-sqlite >= 0.0.35-1",
-        "santoku-sqlite-migrate >= 0.0.19-1",
+        "santoku >= 1.0.0, < 2.0.0",
+        "santoku-web >= 1.0.0, < 2.0.0",
+        "santoku-http >= 1.0.0, < 2.0.0",
+        "santoku-sqlite >= 1.0.0, < 2.0.0",
+        "santoku-sqlite-migrate >= 1.0.0, < 2.0.0",
       },
       rules = {
         ["bundle$"] = {
