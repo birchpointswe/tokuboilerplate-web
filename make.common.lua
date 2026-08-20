@@ -9,6 +9,7 @@ local lp = require("santoku.web.lpeg")
 
 local icon_sizes = { 192, 512 }
 local apple_icon_size = 180
+local roboto_weights = { "300", "400", "500", "700" }
 local splash_screens = {
   { 430, 932, 3 },
   { 393, 852, 3 },
@@ -26,6 +27,17 @@ local splash_screens = {
   { 810, 1080, 2 },
   { 768, 1024, 2 },
 }
+
+local public_files = { "index.css", "favicon.svg", "apple-touch-icon.png" }
+for _, weight in ipairs(roboto_weights) do
+  arr.push(public_files, "roboto-" .. weight .. ".woff2")
+end
+for _, size in ipairs(icon_sizes) do
+  arr.push(public_files, "icon-" .. size .. ".png")
+end
+for _, spec in ipairs(splash_screens) do
+  arr.push(public_files, "splash-" .. spec[1] .. "x" .. spec[2] .. "@" .. spec[3] .. "x.png")
+end
 
 return {
   env = {
@@ -56,6 +68,7 @@ return {
 
     client = {
       files = true,
+      public = public_files,
       dependencies = {
         "lua == 5.1",
         "santoku >= 1.0.0, < 2.0.0",
@@ -98,7 +111,7 @@ return {
       },
     },
 
-    configure = function (submake, envs, register_public_file)
+    configure = function (submake, envs)
       local server_env = envs.server
       local nginx_cfg = envs.root.nginx
       if server_env then
@@ -131,7 +144,6 @@ return {
       local function pwa_hashed(filename)
         return "/{{" .. str.gsub(filename, "%.", "\\\\.") .. "}}"
       end
-      local roboto_weights = { "300", "400", "500", "700" }
       local roboto_urls = {
         ["300"] = "https://fonts.gstatic.com/s/roboto/v32/KFOlCnqEu92Fr1MmSU5fCxc4EsA.woff2",
         ["400"] = "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Mu7GxKOzY.woff2",
@@ -146,7 +158,6 @@ return {
             "curl", "-sL", "-o", font_file, roboto_urls[weight]
           })
         end)
-        register_public_file("roboto-" .. weight .. ".woff2")
       end
       local css_out = fs.join(client_env.public_dir, "index.css")
       local css_in = fs.join(client_env.build_dir, "res/index.css")
@@ -160,7 +171,6 @@ return {
           "--minify"
         })
       end)
-      register_public_file("index.css")
       local icon_svg_src = fs.join(client_env.work_dir, "res/icon.svg")
       local bg = envs.root.client.pwa.background_color
       local favicon_svg = fs.join(client_env.public_dir, "favicon.svg")
@@ -168,7 +178,6 @@ return {
       submake.target({ favicon_svg }, { icon_svg_src }, function ()
         fs.writefile(favicon_svg, fs.readfile(icon_svg_src))
       end)
-      register_public_file("favicon.svg")
       local manifest_icons = {}
       for _, size in ipairs(icon_sizes) do
         local icon_file = fs.join(client_env.public_dir, "icon-" .. size .. ".png")
@@ -179,7 +188,6 @@ return {
             "-o", icon_file, icon_svg_src
           })
         end)
-        register_public_file("icon-" .. size .. ".png")
         arr.push(manifest_icons, {
           src = pwa_hashed("icon-" .. size .. ".png"),
           sizes = size .. "x" .. size,
@@ -194,7 +202,6 @@ return {
           "-o", apple_icon, icon_svg_src
         })
       end)
-      register_public_file("apple-touch-icon.png")
       local splash_opts = {}
       for _, spec in ipairs(splash_screens) do
         local w, h, dpr = spec[1], spec[2], spec[3]
@@ -211,7 +218,6 @@ return {
             )
           })
         end)
-        register_public_file(splash_name)
         arr.push(splash_opts, {
           width = w,
           height = h,
