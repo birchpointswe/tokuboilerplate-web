@@ -86,7 +86,7 @@ return {
       },
       pwa = {
         title = "tokuboilerplate",
-        name = "Toku Boilerplate",
+        name = "tokuboilerplate",
         description = "A web app built with santoku",
         theme_color = "#1e293b",
         background_color = "#f5f5f5",
