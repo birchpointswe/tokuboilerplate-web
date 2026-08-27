@@ -6,10 +6,6 @@ return tbl.merge(
   env = {
     client = {
       ldflags = {
-        "-sWASM_BIGINT",
-        "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE='$stringToNewUTF8'",
-        "-sEXPORTED_FUNCTIONS=_main,_malloc,_free",
-        "-sEXPORTED_RUNTIME_METHODS=stringToUTF8,lengthBytesUTF8,UTF8ToString,stringToNewUTF8",
         "-O0",
         "-g",
         "-sASSERTIONS=2",
