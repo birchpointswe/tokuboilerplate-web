@@ -10,25 +10,13 @@
 
 local sqlite_worker = require("santoku.web.sqlite.worker")
 local migrate = require("santoku.sqlite.migrate")
-local json = require("cjson")
 
-local PAGE_SIZE = 10
-
-local function format_record (rec, has_auth, just_synced_ids)
-  if not rec then return nil end
-  rec.no_session = not has_auth
-  rec.needs_sync = has_auth and not rec.synced_at
-  if just_synced_ids and just_synced_ids[rec.id] then
-    rec.just_synced = true
+local function parse_tags (body)
+  local tags = {}
+  for tag in string.gmatch(body, "#([%w-]+)") do
+    tags[string.lower(tag)] = true
   end
-  return rec
-end
-
-local function format_records (recs, has_auth, just_synced_ids)
-  for i = 1, #recs do
-    format_record(recs[i], has_auth, just_synced_ids)
-  end
-  return recs
+  return tags
 end
 
 return sqlite_worker("/tokuboilerplate.db", function (ok, db)
@@ -37,347 +25,178 @@ return sqlite_worker("/tokuboilerplate.db", function (ok, db)
     return false, db
   end
 
-  db.exec("pragma locking_mode = EXCLUSIVE")
-  db.exec("pragma journal_mode = WAL")
+  db.exec("pragma journal_mode = TRUNCATE")
   db.exec("pragma synchronous = NORMAL")
   db.exec("pragma temp_store = MEMORY")
-  db.exec("pragma cache_size = -2000")
 
   migrate(db, <% return t_migrations %>) -- luacheck: ignore
 
   db.exec([[
-    create temporary table if not exists records_incoming (
+    create temporary table if not exists todos_incoming (
       id text primary key,
-      hlc text,
-      payload text
+      body text,
+      done integer,
+      deleted integer,
+      updated_at real
     )
   ]])
 
   local M = {}
 
-  local get_records_page = db.all([[
-    select id, json_extract(payload, '$.number') as number, hlc, synced_at, true as sw
-    from records
-    where sub = ?1 and json_extract(payload, '$.deleted') is null
-    order by rowid desc
-    limit ?2 offset ?3
+  local add = db.getter([[
+    insert into todos (id, body, done, deleted, updated_at)
+    values (lower(hex(randomblob(8))), ?1, 0, 0, unixepoch('now', 'subsec'))
+    returning id
+  ]])
+
+  local list = db.all([[
+    select
+      t.id, t.body, t.done,
+      (select json_group_array(tag) from todos_tags g where g.todo_id = t.id) as tags
+    from todos t
+    where t.deleted = 0
+    order by t.rowid desc
   ]], true)
 
-  local get_record_count = db.getter([[
-    select count(*) from records where sub = ?1 and json_extract(payload, '$.deleted') is null
+  local toggle = db.runner([[
+    update todos set
+      done = 1 - done,
+      updated_at = unixepoch('now', 'subsec'),
+      synced_at = null
+    where id = ?
   ]])
 
-  local get_max_local_hlc = db.getter([[
-    select max(hlc) from records where sub = ?1
+  local remove = db.runner([[
+    update todos set
+      deleted = 1,
+      updated_at = unixepoch('now', 'subsec'),
+      synced_at = null
+    where id = ?
   ]])
 
-  local get_dirty_ids_on_page = db.getter([[
-    select json_group_array(id) from (
-      select id from records
-      where sub = ?1 and json_extract(payload, '$.deleted') is null
-      and synced_at is null
-      order by rowid desc
-      limit ?2 offset ?3
-    )
-  ]])
+  local clear_tags = db.runner("delete from todos_tags where todo_id = ?")
+  local add_tag = db.runner("insert or ignore into todos_tags (todo_id, tag) values (?, ?)")
+  local clear_all_tags = db.runner("delete from todos_tags")
+  local iter_live = db.iter("select id, body from todos where deleted = 0")
 
-  M.get_numbers = function (page)
-    page = tonumber(page) or 1
-    if page < 1 then page = 1 end
-    local sub = M.get_authorization()
-    local offset = (page - 1) * PAGE_SIZE
-    local total = (sub and get_record_count(sub)) or 0
-    local total_pages = math.max(1, math.ceil(total / PAGE_SIZE))
-    if page > total_pages then page = total_pages end
-    local has_auth = sub ~= nil
-    return json.encode({
-      numbers = format_records((sub and get_records_page(sub, PAGE_SIZE, offset)) or {}, has_auth),
-      page = page,
-      total_pages = total_pages,
-    })
-  end
-
-  local get_setting = db.getter([[
-    select value from settings where key = ?
-  ]])
-
-  local set_setting_insert = db.runner([[
-    insert or ignore into settings (key, value) values (?1, ?2)
-  ]])
-
-  local set_setting_update = db.runner([[
-    update settings set value = ?2 where key = ?1
-  ]])
-
-  local function set_setting (key, value)
-    set_setting_insert(key, value)
-    set_setting_update(key, value)
-  end
-
-  local function get_authorization ()
-    return get_setting("authorization")
-  end
-
-  local gen_sub = db.getter([[
-    select lower(hex(randomblob(16))) as sub
-  ]])
-
-  local function get_or_create_sub ()
-    local sub = get_authorization()
-    if not sub then
-      sub = gen_sub()
-      set_setting("authorization", sub)
+  local function retag (id, body)
+    clear_tags(id)
+    for tag in pairs(parse_tags(body)) do
+      add_tag(id, tag)
     end
-    return sub
   end
 
-  local gen_hlc = db.getter([[
-    insert into hlc_seq values (null)
-    returning unixepoch('now', 'subsec') || '.' || printf('%08x', id) as hlc
-  ]])
-
-  local create_number = db.getter([[
-    insert into records (sub, id, hlc, payload)
-    values (?1, (select id from idgen), ?2, json_object('number', abs(random()) % 1000000000))
-    returning id, json_extract(payload, '$.number') as number, hlc, synced_at, true as sw
-  ]], true)
-
-  local update_number = db.getter([[
-    update records set
-      payload = json_set(payload, '$.number', abs(random()) % 1000000000),
-      hlc = ?3,
-      synced_at = null
-    where sub = ?1 and id = ?2
-    returning id, json_extract(payload, '$.number') as number, hlc, synced_at, true as sw
-  ]], true)
-
-  local was_dirty = db.getter([[
-    select synced_at is null from records where sub = ?1 and id = ?2
-  ]])
-
-  M.create_number = function ()
-    local sub = get_or_create_sub()
-    local hlc = gen_hlc()
-    return json.encode(format_record(create_number(sub, hlc), true))
-  end
-
-  M.update_number = function (id)
-    local sub = get_or_create_sub()
-    local hlc = gen_hlc()
-    return json.encode(format_record(update_number(sub, id, hlc), true))
-  end
-
-  local do_delete_number = db.runner([[
-    update records set
-      payload = json_set(payload, '$.deleted', true),
-      hlc = ?3,
-      synced_at = null
-    where sub = ?1 and id = ?2
-  ]])
-
-  M.delete_number = function (id)
-    local sub = get_or_create_sub()
-    local hlc = gen_hlc()
-    do_delete_number(sub, id, hlc)
+  local function retag_all ()
+    clear_all_tags()
+    for id, body in iter_live() do
+      retag(id, body)
+    end
   end
 
   local get_changes = db.getter([[
-    select json_group_array(json_object(
+    select coalesce(json_group_array(json_object(
       'id', id,
-      'hlc', hlc,
-      'payload', json(payload)
-    )) from records
-    where sub = ?1 and synced_at is null
+      'body', body,
+      'done', done,
+      'deleted', deleted,
+      'updated_at', updated_at
+    )), '[]') from todos where synced_at is null
   ]])
 
-  M.get_changes = function ()
-    local sub = M.get_authorization()
-    if not sub then return "[]" end
-    return get_changes(sub)
-  end
-
-  local clear_incoming = db.runner([[
-    delete from records_incoming
+  local get_since = db.getter([[
+    select coalesce((select value from settings where key = 'last_sync'), '0')
   ]])
+
+  local clear_incoming = db.runner("delete from todos_incoming")
 
   local populate_incoming = db.runner([[
-    insert into records_incoming (id, hlc, payload)
+    insert into todos_incoming (id, body, done, deleted, updated_at)
     select
       json_extract(value, '$.id'),
-      json_extract(value, '$.hlc'),
-      json_extract(value, '$.payload')
-    from json_each(?1)
+      json_extract(value, '$.body'),
+      json_extract(value, '$.done'),
+      json_extract(value, '$.deleted'),
+      json_extract(value, '$.updated_at')
+    from json_each(json_extract(?1, '$.changes'))
   ]])
 
   local insert_from_incoming = db.runner([[
-    insert or ignore into records (sub, id, hlc, payload, synced_at)
-    select ?1, id, hlc, payload, unixepoch('now', 'subsec')
-    from records_incoming
+    insert or ignore into todos (id, body, done, deleted, updated_at, synced_at)
+    select id, body, done, deleted, updated_at, unixepoch('now', 'subsec')
+    from todos_incoming
   ]])
 
   local update_from_incoming = db.runner([[
-    update records set
-      hlc = i.hlc,
-      payload = i.payload,
+    update todos set
+      body = i.body,
+      done = i.done,
+      deleted = i.deleted,
+      updated_at = i.updated_at,
       synced_at = unixepoch('now', 'subsec')
-    from records_incoming i
-    where records.sub = ?1 and records.id = i.id
-      and i.hlc > records.hlc
+    from todos_incoming i
+    where todos.id = i.id and i.updated_at > todos.updated_at
   ]])
-
-  local function apply_changes (changes, sub)
-    clear_incoming()
-    populate_incoming(changes)
-    insert_from_incoming(sub)
-    update_from_incoming(sub)
-  end
 
   local mark_synced = db.runner([[
-    update records set synced_at = unixepoch('now', 'subsec')
-    where sub = ?1 and synced_at is null
+    update todos set synced_at = unixepoch('now', 'subsec')
+    where synced_at is null
   ]])
 
-  M.mark_synced = function ()
-    local sub = M.get_authorization()
-    if not sub then return end
-    mark_synced(sub)
-  end
-
-  local has_unsynced = db.getter([[
-    select exists(select 1 from records where sub = ?1 and synced_at is null)
+  local set_last_sync = db.runner([[
+    insert or replace into settings (key, value)
+    values ('last_sync', json_extract(?1, '$.now'))
   ]])
 
-  M.get_authorization = get_authorization
+  local export = db.getter([[
+    select coalesce(json_group_array(json_object(
+      'id', t.id,
+      'body', t.body,
+      'done', t.done,
+      'tags', (select json_group_array(tag) from todos_tags g where g.todo_id = t.id)
+    )), '[]') from todos t where t.deleted = 0
+  ]])
 
-  M.set_authorization = function (auth)
-    return set_setting("authorization", auth)
+  M.list = function ()
+    return list()
   end
 
-  M.has_authorization = function ()
-    return get_authorization() ~= nil
+  M.add = function (body)
+    return db.transaction(function ()
+      local id = add(body)
+      retag(id, body)
+      return id
+    end)
   end
 
-  M.get_last_sync = function ()
-    return get_setting("last_sync_at")
+  M.toggle = function (id)
+    return toggle(id)
   end
 
-  M.set_last_sync = function (ts)
-    return set_setting("last_sync_at", ts)
+  M.remove = function (id)
+    return db.transaction(function ()
+      remove(id)
+      clear_tags(id)
+    end)
   end
 
-  M.get_auto_sync = function ()
-    local result = get_setting("auto_sync")
-    return result and result == "1"
+  M.changes_for_sync = function ()
+    return get_changes(), get_since()
   end
 
-  M.set_auto_sync = function (enabled)
-    return set_setting("auto_sync", enabled and "1" or "0")
+  M.apply_server = function (response_json)
+    return db.transaction(function ()
+      clear_incoming()
+      populate_incoming(response_json)
+      insert_from_incoming()
+      update_from_incoming()
+      mark_synced()
+      set_last_sync(response_json)
+      retag_all()
+    end)
   end
 
-  local function compute_state (has_auth, has_unsynced_val, auto_sync)
-    if not has_auth then
-      return "error"
-    elseif not has_unsynced_val then
-      return "synced"
-    elseif auto_sync then
-      return "pending"
-    else
-      return "dirty"
-    end
-  end
-
-  M.get_sync_state = function ()
-    local sub = M.get_authorization()
-    local auto_sync = M.get_auto_sync()
-    return json.encode({
-      state = compute_state(sub ~= nil, sub and has_unsynced(sub) == 1, auto_sync),
-      auto_sync = auto_sync
-    })
-  end
-
-  M.toggle_auto_sync = function ()
-    local current = M.get_auto_sync()
-    M.set_auto_sync(not current)
-    local sub = M.get_authorization()
-    local auto_sync = M.get_auto_sync()
-    local state = compute_state(sub ~= nil, sub and has_unsynced(sub) == 1, auto_sync)
-    return json.encode({
-      state = state,
-      auto_sync = auto_sync,
-      trigger_sync = auto_sync and state == "pending"
-    })
-  end
-
-  M.create_number_with_state = function (page)
-    get_or_create_sub()
-    local hlc = gen_hlc()
-    create_number(get_or_create_sub(), hlc)
-    return M.get_numbers_with_state(1)
-  end
-
-  M.update_number_with_state = function (id, page)
-    local sub = get_or_create_sub()
-    local hlc = gen_hlc()
-    update_number(sub, id, hlc)
-    return M.get_numbers_with_state(page)
-  end
-
-  M.delete_number_with_state = function (id, page)
-    local sub = get_or_create_sub()
-    local hlc = gen_hlc()
-    do_delete_number(sub, id, hlc)
-    page = tonumber(page) or 1
-    local total = get_record_count(sub) or 0
-    local offset = (page - 1) * PAGE_SIZE
-    if offset >= total and page > 1 then
-      page = page - 1
-    end
-    return M.get_numbers_with_state(page)
-  end
-
-  M.get_numbers_with_state = function (page)
-    page = tonumber(page) or 1
-    if page < 1 then page = 1 end
-    local sub = M.get_authorization()
-    local offset = (page - 1) * PAGE_SIZE
-    local total = (sub and get_record_count(sub)) or 0
-    local total_pages = math.max(1, math.ceil(total / PAGE_SIZE))
-    if page > total_pages then page = total_pages end
-    local has_auth = sub ~= nil
-    local auto_sync = M.get_auto_sync()
-    return json.encode({
-      numbers = format_records((sub and get_records_page(sub, PAGE_SIZE, offset)) or {}, has_auth),
-      page = page,
-      total_pages = total_pages,
-      sync_state = compute_state(has_auth, sub and has_unsynced(sub) == 1, auto_sync),
-      auto_sync = auto_sync,
-    })
-  end
-
-  M.get_auth_status = function ()
-    return json.encode({ has_session = M.has_authorization() })
-  end
-
-  M.delete_session = function ()
-    M.set_authorization(nil)
-    return json.encode({ has_session = false })
-  end
-
-  M.save_session = function (auth)
-    M.set_authorization(auth)
-    return json.encode({ has_session = true })
-  end
-
-  M.complete_sync = function (server_changes_json, page)
-    local sub = M.get_authorization()
-    if not sub then return M.get_numbers_with_state(page) end
-    apply_changes(server_changes_json, sub)
-    mark_synced(sub)
-    local max_hlc = get_max_local_hlc(sub)
-    if max_hlc then
-      M.set_last_sync(tostring(max_hlc))
-    end
-    return M.get_numbers_with_state(page)
+  M.export = function ()
+    return export()
   end
 
   return true, M

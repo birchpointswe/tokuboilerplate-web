@@ -1,153 +1,138 @@
 local js = require("santoku.web.js")
-local str = require("santoku.string")
-local sqlite_proxy = require("santoku.web.sqlite.proxy")
-local vue = require("santoku.web.vue")
-local async = require("santoku.web.async")
-local util = require("santoku.web.util")
-local json = require("cjson")
-
-local hash_manifest = js.self.HASH_MANIFEST
-local function resolve_hashed (path)
-  if hash_manifest then
-    local name = str.stripprefix(path, "/")
-    local hashed = hash_manifest[name]
-    if hashed then
-      return "/" .. hashed
-    end
-  end
-  return path
-end
-
-local function fetch_json (url)
-  local ok, response = js.self:fetch(url):await()
-  if not ok or not response.ok then return nil end
-  local ok2, text = response:text():await()
-  if not ok2 then return nil end
-  return json.decode(text)
-end
-
 local val = require("santoku.web.val")
+local dom = require("santoku.web.dom")
+local async = require("santoku.web.async")
+local socket = require("santoku.web.socket")
+local proxy = require("santoku.web.sqlite.proxy")
 
-local function apply_data (self, data)
-  if not data then return end
-  self.numbers = val(data.numbers, true)
-  self.page = data.page
-  self.total_pages = data.total_pages
-  if data.sync_state then self.sync_state = data.sync_state end
-  if data.auto_sync ~= nil then self.auto_sync = data.auto_sync end
-  if self.auto_sync and (self.sync_state == "dirty" or self.sync_state == "pending") then
-    self:doSync()
+local bundle_js = js.document:querySelector('meta[name="bundle-js"]').content
+local core, ready = proxy(bundle_js)
+
+local function esc (s)
+  s = string.gsub(s, "&", "&amp;")
+  s = string.gsub(s, "<", "&lt;")
+  s = string.gsub(s, ">", "&gt;")
+  s = string.gsub(s, "\"", "&quot;")
+  return s
+end
+
+local function tag_html (tags_json)
+  if not tags_json or tags_json == "[]" then
+    return ""
+  end
+  local parts = {}
+  for tag in string.gmatch(tags_json, "\"([^\"]+)\"") do
+    parts[#parts + 1] = "<em class=\"tag\">#" .. esc(tag) .. "</em>"
+  end
+  return table.concat(parts, " ")
+end
+
+local render
+
+local function bind_item (id)
+  dom.listen("t-" .. id, "click", function ()
+    async(function ()
+      core.toggle(id)
+      render()
+    end)
+  end)
+  dom.listen("d-" .. id, "click", function ()
+    async(function ()
+      core.remove(id)
+      render()
+    end)
+  end)
+end
+
+render = function ()
+  local rows = core.list()
+  local parts = {}
+  for i = 1, #rows do
+    local r = rows[i]
+    local done = r.done == 1
+    parts[#parts + 1] = table.concat({
+      "<li id=\"item-", r.id, "\"", done and " class=\"done\"" or "", ">",
+      "<button id=\"t-", r.id, "\">", done and "undo" or "done", "</button>",
+      "<span>", esc(r.body), " ", tag_html(r.tags), "</span>",
+      "<button id=\"d-", r.id, "\">x</button>",
+      "</li>",
+    })
+  end
+  dom.html("todo-list", table.concat(parts))
+  dom.text("status", #rows == 0 and "Nothing yet." or (#rows .. " item(s)"))
+  dom.flush()
+  for i = 1, #rows do
+    bind_item(rows[i].id)
   end
 end
 
-local sync_fetch = util.atleast(function (page)
-  return fetch_json("/sync?page=" .. page)
-end, 300)
-
-local bundle_js = resolve_hashed(js.document:querySelector('meta[name="bundle-js"]').content)
-async(function ()
-  sqlite_proxy(bundle_js):await()
-
-  local debounced_sync = util.debounce(function (self)
-    self.syncing = true
-    local data = sync_fetch(self.page)
-    self.syncing = false
-    if data then
-      apply_data(self, data)
+local function add_current ()
+  async(function ()
+    local value = dom.read({ "prop", "new-todo", "value" })
+    if value and value ~= "" then
+      core.add(value)
+      dom.prop("new-todo", "value", "")
+      dom.flush()
+      render()
     end
-  end, 300)
+  end)
+end
 
-  local scope = {
+local function do_sync ()
+  async(function ()
+    dom.text("sync-status", "syncing...")
+    dom.flush()
+    local changes, since = core.changes_for_sync()
+    local ok, resp = socket.fetch("/sync?since=" .. since, {
+      method = "POST",
+      headers = { ["Content-Type"] = "application/json" },
+      body = changes,
+    })
+    if not ok then
+      dom.text("sync-status", "sync failed (" .. tostring(resp and resp.status) .. ")")
+      dom.flush()
+      return
+    end
+    core.apply_server(resp.body())
+    dom.text("sync-status", "synced")
+    dom.flush()
+    render()
+  end)
+end
 
-    numbers = {},
-    page = 1,
-    total_pages = 1,
-    sync_state = "loading",
-    auto_sync = false,
-    has_session = false,
-    loading = true,
-    syncing = false,
+local function do_export ()
+  async(function ()
+    local data = core.export()
+    local blob = js.Blob:new(val({ data }, true), val({ type = "application/json" }, true))
+    local url = js.URL:createObjectURL(blob)
+    local a = js.document:createElement("a")
+    a.href = url
+    a.download = "tokuboilerplate-export.json"
+    a:click()
+    js.URL:revokeObjectURL(url)
+  end)
+end
 
-    load = function (self)
-      async(function ()
-        apply_data(self, fetch_json("/numbers?page=" .. self.page))
-        self.loading = false
-      end)
-    end,
-
-    createNumber = function (self)
-      async(function ()
-        apply_data(self, fetch_json("/number/create?page=1"))
-      end)
-    end,
-
-    updateNumber = function (self, id)
-      async(function ()
-        apply_data(self, fetch_json("/number/update?id=" .. id .. "&page=" .. self.page))
-      end)
-    end,
-
-    deleteNumber = function (self, id)
-      async(function ()
-        apply_data(self, fetch_json("/number/delete?id=" .. id .. "&page=" .. self.page))
-      end)
-    end,
-
-    goToPage = function (self, p)
-      self.page = p
-      self:load()
-    end,
-
-    prevPage = function (self)
-      if self.page > 1 then
-        self:goToPage(self.page - 1)
-      end
-    end,
-
-    nextPage = function (self)
-      if self.page < self.total_pages then
-        self:goToPage(self.page + 1)
-      end
-    end,
-
-    toggleAutoSync = function (self)
-      async(function ()
-        local data = fetch_json("/auto-sync/toggle")
-        if data then
-          self.sync_state = data.state
-          self.auto_sync = data.auto_sync
-          if data.trigger_sync then
-            self:doSync()
-          end
-        end
-      end)
-    end,
-
-    doSync = function (self)
-      debounced_sync(self)
-    end,
-
-    loadSyncStatus = function (self)
-      async(function ()
-        local data = fetch_json("/sync/status")
-        if data then
-          self.sync_state = data.state
-          self.auto_sync = data.auto_sync
-        end
-      end)
-    end,
-
-    deleteSession = function (self)
-      async(function ()
-        local data = fetch_json("/session/delete")
-        if data then
-          self.has_session = data.has_session
-        end
-      end)
-    end,
-
-  }
-
-  vue.createApp(scope):mount("#app-content")
-
+async(function ()
+  local ok = ready:await()
+  if ok == false then
+    dom.text("status", "Database failed to start.")
+    dom.flush()
+    return
+  end
+  dom.listen("add-btn", "click", function ()
+    add_current()
+  end)
+  dom.listen("new-todo", "keydown", function (_, ev)
+    if ev.key == "Enter" then
+      add_current()
+    end
+  end)
+  dom.listen("sync-btn", "click", function ()
+    do_sync()
+  end)
+  dom.listen("export-btn", "click", function ()
+    do_export()
+  end)
+  render()
 end)
