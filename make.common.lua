@@ -5,28 +5,11 @@ local arr = require("santoku.array")
 local sys = require("santoku.system")
 local env = require("santoku.env")
 local build = require("santoku.make.build")
-local lp = require("santoku.web.lpeg")
+local lp = require("santoku.lpeg")
 
 local icon_sizes = { 192, 512 }
 local apple_icon_size = 180
 local roboto_weights = { "300", "400", "500", "700" }
-local splash_screens = {
-  { 430, 932, 3 },
-  { 393, 852, 3 },
-  { 428, 926, 3 },
-  { 390, 844, 3 },
-  { 375, 812, 3 },
-  { 414, 896, 3 },
-  { 414, 896, 2 },
-  { 414, 736, 3 },
-  { 375, 667, 2 },
-  { 320, 568, 2 },
-  { 1024, 1366, 2 },
-  { 834, 1194, 2 },
-  { 820, 1180, 2 },
-  { 810, 1080, 2 },
-  { 768, 1024, 2 },
-}
 
 local public_files = { "index.css", "favicon.svg", "apple-touch-icon.png" }
 for _, weight in ipairs(roboto_weights) do
@@ -34,9 +17,6 @@ for _, weight in ipairs(roboto_weights) do
 end
 for _, size in ipairs(icon_sizes) do
   arr.push(public_files, "icon-" .. size .. ".png")
-end
-for _, spec in ipairs(splash_screens) do
-  arr.push(public_files, "splash-" .. spec[1] .. "x" .. spec[2] .. "@" .. spec[3] .. "x.png")
 end
 
 return {
@@ -46,22 +26,22 @@ return {
     version = "0.0.1-1",
     dependencies = {
       "lua == 5.1",
-      "santoku >= 1.0.0, < 2.0.0",
+      "santoku >= 2.0.0, < 3.0.0",
     },
     build = {
       dependencies = {
-        "santoku-web >= 1.0.0, < 2.0.0",
+        "santoku-web >= 2.0.0, < 3.0.0",
       }
     },
 
     server = {
       dependencies = {
         "lua == 5.1",
-        "santoku >= 1.0.0, < 2.0.0",
-        "santoku-web >= 1.0.0, < 2.0.0",
-        "santoku-mustache >= 1.0.0, < 2.0.0",
-        "santoku-sqlite >= 1.0.0, < 2.0.0",
-        "santoku-sqlite-migrate >= 1.0.0, < 2.0.0",
+        "santoku >= 2.0.0, < 3.0.0",
+        "santoku-web >= 2.0.0, < 3.0.0",
+        "santoku-mustache >= 2.0.0, < 3.0.0",
+        "santoku-sqlite >= 2.0.0, < 3.0.0",
+        "santoku-sqlite-migrate >= 2.0.0, < 3.0.0",
         "argparse >= 0.7.1-1",
       },
     },
@@ -71,11 +51,11 @@ return {
       public = public_files,
       dependencies = {
         "lua == 5.1",
-        "santoku >= 1.0.0, < 2.0.0",
-        "santoku-web >= 1.0.0, < 2.0.0",
-        "santoku-http >= 1.0.0, < 2.0.0",
-        "santoku-sqlite >= 1.0.0, < 2.0.0",
-        "santoku-sqlite-migrate >= 1.0.0, < 2.0.0",
+        "santoku >= 2.0.0, < 3.0.0",
+        "santoku-web >= 2.0.0, < 3.0.0",
+        "santoku-http >= 2.0.0, < 3.0.0",
+        "santoku-sqlite >= 2.0.0, < 3.0.0",
+        "santoku-sqlite-migrate >= 2.0.0, < 3.0.0",
       },
       rules = {
         ["bundle$"] = {
@@ -141,9 +121,6 @@ return {
       end
       local client_env = envs.client
       if not client_env then return end
-      local function pwa_hashed(filename)
-        return "/{{" .. str.gsub(filename, "%.", "\\\\.") .. "}}"
-      end
       local roboto_urls = {
         ["300"] = "https://fonts.gstatic.com/s/roboto/v32/KFOlCnqEu92Fr1MmSU5fCxc4EsA.woff2",
         ["400"] = "https://fonts.gstatic.com/s/roboto/v32/KFOmCnqEu92Fr1Mu7GxKOzY.woff2",
@@ -189,7 +166,7 @@ return {
           })
         end)
         arr.push(manifest_icons, {
-          src = pwa_hashed("icon-" .. size .. ".png"),
+          src = "/icon-" .. size .. ".png",
           sizes = size .. "x" .. size,
           type = "image/png"
         })
@@ -202,33 +179,10 @@ return {
           "-o", apple_icon, icon_svg_src
         })
       end)
-      local splash_opts = {}
-      for _, spec in ipairs(splash_screens) do
-        local w, h, dpr = spec[1], spec[2], spec[3]
-        local pw, ph = w * dpr, h * dpr
-        local splash_name = "splash-" .. w .. "x" .. h .. "@" .. dpr .. "x.png"
-        local splash_file = fs.join(client_env.public_dir, splash_name)
-        submake.target({ client_env.target }, { splash_file })
-        submake.target({ splash_file }, { icon_svg_src }, function ()
-          local icon_size = num.min(pw, ph) * 0.3
-          sys.execute({
-            "sh", "-c", str.format(
-              "convert -size %dx%d xc:'%s' \\( %s -resize %dx%d \\) -gravity center -composite %s",
-              pw, ph, bg, icon_svg_src, icon_size, icon_size, splash_file
-            )
-          })
-        end)
-        arr.push(splash_opts, {
-          width = w,
-          height = h,
-          dpr = dpr,
-          src = pwa_hashed(splash_name)
-        })
-      end
-      envs.root.client.pwa.manifest_icons = manifest_icons
-      envs.root.client.pwa.favicon_svg = pwa_hashed("favicon.svg")
-      envs.root.client.pwa.ios_icon = pwa_hashed("apple-touch-icon.png")
-      envs.root.client.pwa.splash_screens = splash_opts
+      envs.root.client.pwa.icons = manifest_icons
+      envs.root.client.pwa.manifest = "/manifest.json"
+      envs.root.client.pwa.favicon_svg = "/favicon.svg"
+      envs.root.client.pwa.ios_icon = "/apple-touch-icon.png"
       if client_env.static_files_ok then
         local all_static_files = { css_out, favicon_svg, apple_icon }
         for _, weight in ipairs(roboto_weights) do
@@ -236,10 +190,6 @@ return {
         end
         for _, size in ipairs(icon_sizes) do
           arr.push(all_static_files, fs.join(client_env.public_dir, "icon-" .. size .. ".png"))
-        end
-        for _, spec in ipairs(splash_screens) do
-          local w, h, dpr = spec[1], spec[2], spec[3]
-          arr.push(all_static_files, fs.join(client_env.public_dir, "splash-" .. w .. "x" .. h .. "@" .. dpr .. "x.png"))
         end
         submake.target({ client_env.static_files_ok }, all_static_files, function ()
           fs.touch(client_env.static_files_ok)
