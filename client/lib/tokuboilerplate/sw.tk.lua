@@ -1,15 +1,12 @@
 <%
   serialize = require("santoku.serialize")
   local arr = require("santoku.array")
-  local str = require("santoku.string")
   all_precache = {}
   for _, name in ipairs(public_files_static_for_precache) do
     arr.push(all_precache, name)
   end
   for name in pairs(registered_public_files) do
-    if not str.startswith(name, "splash-") then
-      arr.push(all_precache, name)
-    end
+    arr.push(all_precache, name)
   end
 %>
 
