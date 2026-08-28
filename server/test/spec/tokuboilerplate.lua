@@ -2,8 +2,9 @@ local test = require("santoku.test")
 local err = require("santoku.error")
 local http = require("socket.http")
 local ltn12 = require("ltn12")
+local env = require("santoku.env")
 
-local url = "http://localhost:8087/sync"
+local url = "http://localhost:" .. env.var("PORT", "8080") .. "/sync"
 local run_id = "spec" .. tostring(os.time())
 
 local function post (u, body)
