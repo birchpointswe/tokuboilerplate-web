@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="bundle-js" content="/bundle.js">
+<title>tokuboilerplate</title>
+<style>
+  body { font-family: sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+  #composer { display: flex; gap: 0.5rem; }
+  #new-todo { flex: 1; padding: 0.4rem; }
+  #todo-list { list-style: none; padding: 0; }
+  #todo-list li { display: flex; gap: 0.5rem; align-items: center; padding: 0.3rem 0; }
+  #todo-list li span { flex: 1; }
+  #todo-list li.done span { text-decoration: line-through; color: #888; }
+  .tag { color: #06c; font-style: normal; }
+  #toolbar { display: flex; gap: 0.5rem; align-items: center; margin-top: 1rem; }
+  #sync-status { color: #888; }
+</style>
+</head>
+<body>
+<main id="app">
+  <h1>tokuboilerplate</h1>
+  <div id="composer">
+    <input id="new-todo" type="text" placeholder="What needs doing? Use #tags">
+    <button id="add-btn">Add</button>
+  </div>
+  <ul id="todo-list"></ul>
+  <p id="status">Loading...</p>
+  <div id="toolbar">
+    <button id="sync-btn">Sync</button>
+    <button id="export-btn">Export</button>
+    <span id="sync-status"></span>
+  </div>
+</main>
+<script src="/bundle.js"></script>
+</body>
+</html>
