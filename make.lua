@@ -21,7 +21,7 @@ return {
       dependencies = {
         "lua == 5.1",
         "santoku >= 2.0.0, < 3.0.0",
-        "santoku-sqlite >= 2.2.0, < 3.0.0",
+        "santoku-sqlite >= 3.0.1, < 4.0.0",
         "santoku-sqlite-migrate >= 2.0.0, < 3.0.0",
       },
       test = {
@@ -37,7 +37,7 @@ return {
         "lua == 5.1",
         "santoku >= 2.0.0, < 3.0.0",
         "santoku-web >= 2.0.1, < 3.0.0",
-        "santoku-sqlite >= 2.2.0, < 3.0.0",
+        "santoku-sqlite >= 3.0.1, < 4.0.0",
         "santoku-sqlite-migrate >= 2.0.0, < 3.0.0",
       },
       test = {
