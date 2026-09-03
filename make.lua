@@ -54,7 +54,7 @@ return {
 
     nginx = {
       domain = env.var("DOMAIN", "localhost"),
-      port = env.var("PORT", "8080"),
+      port = "8080",
       workers = "1",
       modules = {
         "tokuboilerplate.web.init",
