@@ -1,3 +1,5 @@
+local str = require("santoku.string")
+local arr = require("santoku.array")
 local js = require("santoku.web.js")
 local val = require("santoku.web.val")
 local dom = require("santoku.web.dom")
@@ -9,10 +11,10 @@ local bundle_js = js.document:querySelector('meta[name="bundle-js"]').content
 local core, ready = proxy(bundle_js)
 
 local function esc (s)
-  s = string.gsub(s, "&", "&amp;")
-  s = string.gsub(s, "<", "&lt;")
-  s = string.gsub(s, ">", "&gt;")
-  s = string.gsub(s, "\"", "&quot;")
+  s = str.gsub(s, "&", "&amp;")
+  s = str.gsub(s, "<", "&lt;")
+  s = str.gsub(s, ">", "&gt;")
+  s = str.gsub(s, "\"", "&quot;")
   return s
 end
 
@@ -21,10 +23,10 @@ local function tag_html (tags_json)
     return ""
   end
   local parts = {}
-  for tag in string.gmatch(tags_json, "\"([^\"]+)\"") do
+  for tag in str.gmatch(tags_json, "\"([^\"]+)\"") do
     parts[#parts + 1] = "<em class=\"tag\">#" .. esc(tag) .. "</em>"
   end
-  return table.concat(parts, " ")
+  return arr.concat(parts, " ")
 end
 
 local render
@@ -50,7 +52,7 @@ render = function ()
   for i = 1, #rows do
     local r = rows[i]
     local done = r.done == 1
-    parts[#parts + 1] = table.concat({
+    parts[#parts + 1] = arr.concat({
       "<li id=\"item-", r.id, "\"", done and " class=\"done\"" or "", ">",
       "<button id=\"t-", r.id, "\">", done and "undo" or "done", "</button>",
       "<span>", esc(r.body), " ", tag_html(r.tags), "</span>",
@@ -58,7 +60,7 @@ render = function ()
       "</li>",
     })
   end
-  dom.html("todo-list", table.concat(parts))
+  dom.html("todo-list", arr.concat(parts))
   dom.text("status", #rows == 0 and "Nothing yet." or (#rows .. " item(s)"))
   dom.flush()
   for i = 1, #rows do

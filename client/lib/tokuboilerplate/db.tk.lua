@@ -9,12 +9,13 @@
 %>
 
 local sqlite_worker = require("santoku.web.sqlite.worker")
+local str = require("santoku.string")
 local migrate = require("santoku.sqlite.migrate")
 
 local function parse_tags (body)
   local tags = {}
-  for tag in string.gmatch(body, "#([%w-]+)") do
-    tags[string.lower(tag)] = true
+  for tag in str.gmatch(body, "#([%w-]+)") do
+    tags[str.lower(tag)] = true
   end
   return tags
 end
