@@ -13,8 +13,9 @@ local db_mod = require("santoku.sqlite.db")
 local sqlite = require("santoku.sqlite")
 local migrate = require("santoku.sqlite.migrate")
 
-return function (db_file)
+return function (db_file, opts)
 
+  opts = opts or {}
   local M = {}
   local db = sqlite(err.assert(db_mod.open(db_file)))
 
@@ -22,7 +23,9 @@ return function (db_file)
   db.exec("pragma journal_mode = WAL")
   db.exec("pragma synchronous = NORMAL")
 
-  migrate(db, <% return t_migrations %>) -- luacheck: ignore
+  if not opts.no_migrate then
+    migrate(db, <% return t_migrations %>) -- luacheck: ignore
+  end
 
   db.exec([[
     create temporary table if not exists todos_incoming (

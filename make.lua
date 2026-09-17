@@ -55,9 +55,10 @@ return {
     nginx = {
       domain = env.var("DOMAIN", "localhost"),
       port = "8080",
-      workers = "1",
+      workers = env.var("WORKERS", "auto"),
       modules = {
         "tokuboilerplate.web.init",
+        "tokuboilerplate.web.init_worker",
         "tokuboilerplate.web.sync",
       },
     },
