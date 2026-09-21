@@ -22,6 +22,7 @@ return function (db_file, opts)
   db.exec("pragma busy_timeout = 30000")
   db.exec("pragma journal_mode = WAL")
   db.exec("pragma synchronous = NORMAL")
+  db.exec("pragma cache_size = -8192")
 
   if not opts.no_migrate then
     migrate(db, <% return t_migrations %>) -- luacheck: ignore
