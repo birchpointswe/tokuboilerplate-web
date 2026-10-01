@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MIT
+-- SPDX-FileCopyrightText: 2025 Birch Point SWE
 local db = require("tokuboilerplate.db.loaded")
 
 local args = ngx.req.get_uri_args()

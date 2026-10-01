@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MIT
+-- SPDX-FileCopyrightText: 2025 Birch Point SWE
 <%
   local fs = require("santoku.fs")
   local serialize = require("santoku.serialize")
